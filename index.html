@@ -276,6 +276,20 @@
                     </div>
                 </div>
 
+                <!-- Not Alanı -->
+                <div>
+                    <label class="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Not <span class="text-gray-400 dark:text-gray-600 font-normal">(opsiyonel)</span></label>
+                    <input
+                        id="alarm-note"
+                        type="text"
+                        maxlength="120"
+                        placeholder="Örn: Destek kırılırsa sat, haber bekliyorum..."
+                        autocomplete="off"
+                        class="alarm-input w-full px-3 py-2 rounded-lg text-sm bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-600 transition-colors"
+                        onkeydown="if(event.key==='Enter') addAlarm()"
+                    >
+                </div>
+
                 <!-- Error msg -->
                 <p id="alarm-form-error" class="hidden text-xs text-red-500 dark:text-red-400 pt-1"></p>
 
@@ -426,10 +440,12 @@
         function addAlarm() {
             const symInput   = document.getElementById('alarm-symbol');
             const priceInput = document.getElementById('alarm-price');
+            const noteInput  = document.getElementById('alarm-note');
             const errEl      = document.getElementById('alarm-form-error');
 
             const rawSym     = symInput.value.trim().toUpperCase().replace(/[\/_]USDT$/,'');
             const targetPrice = parseFloat(priceInput.value);
+            const note        = noteInput.value.trim();
 
             // Validasyon
             if (!rawSym) {
@@ -462,11 +478,16 @@
                 displaySymbol: rawSym,
                 targetPrice: targetPrice,
                 direction: selectedDirection,
+                note: note,
+                triggered: false,
+                triggeredAt: null,
+                triggeredPrice: null,
                 addedAt: Date.now()
             });
 
             symInput.value  = '';
             priceInput.value = '';
+            noteInput.value  = '';
             updateCurrentPriceHint();
             renderAlarmList();
             updateAlarmBadge();
@@ -498,9 +519,11 @@
         // ─────────────────────────────────────────────────────────
         function checkAlerts() {
             if (!alerts.length) return;
-            const toRemove = [];
+            let anyFired = false;
 
             alerts.forEach(alarm => {
+                if (alarm.triggered) return; // Zaten tetiklendi, tekrar kontrol etme
+
                 const coinData = coins[alarm.symbol];
                 if (!coinData) return;
 
@@ -511,13 +534,15 @@
                 if (alarm.direction === 'below' && price <= alarm.targetPrice) fired = true;
 
                 if (fired) {
+                    alarm.triggered     = true;
+                    alarm.triggeredAt   = Date.now();
+                    alarm.triggeredPrice = price;
                     triggerAlert(alarm, price);
-                    toRemove.push(alarm.id);
+                    anyFired = true;
                 }
             });
 
-            if (toRemove.length) {
-                alerts = alerts.filter(a => !toRemove.includes(a.id));
+            if (anyFired) {
                 renderAlarmList();
                 updateAlarmBadge();
             }
@@ -546,13 +571,13 @@
             }
 
             // 3. Sayfa içi toast
-            showToast(alarm.displaySymbol, alarm.targetPrice, currentPrice, alarm.direction);
+            showToast(alarm.displaySymbol, alarm.targetPrice, currentPrice, alarm.direction, alarm.note);
         }
 
         // ─────────────────────────────────────────────────────────
         //  TOAST
         // ─────────────────────────────────────────────────────────
-        function showToast(symbol, targetPrice, currentPrice, direction) {
+        function showToast(symbol, targetPrice, currentPrice, direction, note) {
             const container = document.getElementById('toast-container');
             const isUp = direction === 'above';
 
@@ -583,6 +608,7 @@
                                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                                     Güncel: <span class="font-mono tabular-nums text-gray-700 dark:text-gray-200">${currentPrice.toFixed(5)} USDT</span>
                                 </p>
+                                ${note ? `<p class="text-xs italic text-gray-400 dark:text-gray-500 mt-1">"${note}"</p>` : ''}
                             </div>
                             <button class="text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-300 transition-colors flex-shrink-0 mt-0.5" onclick="dismissToast(this)">
                                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
@@ -632,43 +658,76 @@
 
             clearBtn.classList.remove('hidden');
 
-            container.innerHTML = alerts.map(alarm => {
+            const activeAlarms    = alerts.filter(a => !a.triggered);
+            const triggeredAlarms = alerts.filter(a => a.triggered);
+
+            function renderCard(alarm) {
                 const coinData     = coins[alarm.symbol];
                 const currentPrice = coinData ? coinData.price : null;
                 const isUp         = alarm.direction === 'above';
+                const isTriggered  = alarm.triggered;
 
-                // Fiyata ne kadar uzak?
+                // Fiyata ne kadar uzak? (sadece aktif alarmlar için)
                 let distanceText = '';
-                if (currentPrice) {
+                if (!isTriggered && currentPrice) {
                     const diff    = alarm.targetPrice - currentPrice;
                     const diffPct = (diff / currentPrice * 100).toFixed(2);
                     const sign    = diff >= 0 ? '+' : '';
                     distanceText  = `${sign}${diffPct}%`;
                 }
 
+                // Tetiklenme zamanı
+                let triggeredTimeStr = '';
+                if (isTriggered && alarm.triggeredAt) {
+                    const d = new Date(alarm.triggeredAt);
+                    triggeredTimeStr = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                }
+
+                const cardBase = isTriggered
+                    ? 'bg-gray-50/60 dark:bg-gray-800/20 border-gray-200/60 dark:border-gray-700/30 opacity-60'
+                    : 'bg-gray-50 dark:bg-gray-800/60 border-gray-200 dark:border-gray-700/60 hover:border-gray-300 dark:hover:border-gray-600';
+
+                const iconBase = isTriggered
+                    ? 'bg-gray-100 dark:bg-gray-700/40 text-gray-400 dark:text-gray-500'
+                    : (isUp
+                        ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-red-100 dark:bg-red-900/40 text-red-500 dark:text-red-400');
+
                 return `
-                    <div class="alarm-item flex items-start gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 hover:border-gray-300 dark:hover:border-gray-600 transition-colors group">
+                    <div class="alarm-item flex items-start gap-3 p-3 rounded-lg border transition-colors group ${cardBase}">
                         <!-- Yön İkonu -->
-                        <div class="flex-shrink-0 w-7 h-7 rounded-md flex items-center justify-center text-sm mt-0.5
-                            ${isUp ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'
-                                   : 'bg-red-100 dark:bg-red-900/40 text-red-500 dark:text-red-400'}">
-                            ${isUp ? '↑' : '↓'}
+                        <div class="flex-shrink-0 w-7 h-7 rounded-md flex items-center justify-center text-sm mt-0.5 ${iconBase}">
+                            ${isTriggered ? '✓' : (isUp ? '↑' : '↓')}
                         </div>
                         <!-- Bilgi -->
                         <div class="flex-1 min-w-0">
-                            <div class="flex items-baseline gap-2">
-                                <span class="font-bold text-gray-800 dark:text-gray-100 text-sm">${alarm.displaySymbol}/USDT</span>
-                                ${distanceText ? `<span class="text-xs tabular-nums ${parseFloat(distanceText) >= 0 ? 'text-emerald-500' : 'text-red-400'}">${distanceText}</span>` : ''}
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="font-bold text-sm ${isTriggered ? 'text-gray-500 dark:text-gray-500' : 'text-gray-800 dark:text-gray-100'}">${alarm.displaySymbol}/USDT</span>
+                                ${isTriggered
+                                    ? `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-semibold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-700/50">
+                                           ✓ Tetiklendi
+                                       </span>`
+                                    : (distanceText ? `<span class="text-xs tabular-nums ${parseFloat(distanceText) >= 0 ? 'text-emerald-500' : 'text-red-400'}">${distanceText}</span>` : '')
+                                }
                             </div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                                ${isUp ? 'Fiyat ≥' : 'Fiyat ≤'} 
-                                <span class="font-semibold text-gray-700 dark:text-gray-200 tabular-nums">${alarm.targetPrice} USDT</span>
+                            <p class="text-xs mt-0.5 ${isTriggered ? 'text-gray-400 dark:text-gray-600' : 'text-gray-500 dark:text-gray-400'}">
+                                ${isUp ? 'Fiyat ≥' : 'Fiyat ≤'}
+                                <span class="font-semibold tabular-nums ${isTriggered ? 'text-gray-500 dark:text-gray-500' : 'text-gray-700 dark:text-gray-200'}">${alarm.targetPrice} USDT</span>
                             </p>
-                            ${currentPrice ? `
-                            <p class="text-xs text-gray-400 dark:text-gray-600 tabular-nums">
-                                Şu an: ${currentPrice.toFixed(5)} USDT
-                            </p>` : `
-                            <p class="text-xs text-gray-400 dark:text-gray-600">Veri bekleniyor...</p>`}
+                            ${isTriggered
+                                ? `<p class="text-xs text-gray-400 dark:text-gray-600 tabular-nums">
+                                       Tetiklenme: ${alarm.triggeredPrice ? alarm.triggeredPrice.toFixed(5) + ' USDT' : '—'}
+                                       ${triggeredTimeStr ? `<span class="ml-1">(${triggeredTimeStr})</span>` : ''}
+                                   </p>`
+                                : (currentPrice
+                                    ? `<p class="text-xs text-gray-400 dark:text-gray-600 tabular-nums">Şu an: ${currentPrice.toFixed(5)} USDT</p>`
+                                    : `<p class="text-xs text-gray-400 dark:text-gray-600">Veri bekleniyor...</p>`)
+                            }
+                            ${alarm.note
+                                ? `<p class="text-xs mt-1.5 italic px-2 py-1 rounded bg-gray-100 dark:bg-gray-700/40 border border-gray-200 dark:border-gray-600/40 ${isTriggered ? 'text-gray-400 dark:text-gray-600' : 'text-gray-500 dark:text-gray-400'}">
+                                       "${alarm.note}"
+                                   </p>`
+                                : ''}
                         </div>
                         <!-- Sil -->
                         <button onclick="removeAlarm(${alarm.id})"
@@ -679,7 +738,23 @@
                         </button>
                     </div>
                 `;
-            }).join('');
+            }
+
+            let html = activeAlarms.map(renderCard).join('');
+
+            // Tetiklenen alarmlar ayrı başlıkla
+            if (triggeredAlarms.length) {
+                html += `
+                    <div class="flex items-center gap-2 mt-4 mb-2">
+                        <div class="flex-1 h-px bg-gray-200 dark:bg-gray-700/50"></div>
+                        <span class="text-xs text-gray-400 dark:text-gray-600 font-medium whitespace-nowrap">Geçmiş (${triggeredAlarms.length})</span>
+                        <div class="flex-1 h-px bg-gray-200 dark:bg-gray-700/50"></div>
+                    </div>
+                `;
+                html += triggeredAlarms.map(renderCard).join('');
+            }
+
+            container.innerHTML = html;
         }
 
         // ─────────────────────────────────────────────────────────
@@ -687,9 +762,12 @@
         // ─────────────────────────────────────────────────────────
         function updateAlarmBadge() {
             const badge = document.getElementById('alarm-badge');
+            const activeCount = alerts.filter(a => !a.triggered).length;
             if (alerts.length > 0) {
-                badge.textContent = alerts.length;
+                badge.textContent = activeCount > 0 ? activeCount : '✓';
                 badge.classList.remove('hidden');
+                // Aktif alarm varsa kırmızı, hepsi tetiklendiyse yeşil
+                badge.className = badge.className.replace(/bg-\w+-500/, activeCount > 0 ? 'bg-red-500' : 'bg-emerald-500');
             } else {
                 badge.classList.add('hidden');
             }

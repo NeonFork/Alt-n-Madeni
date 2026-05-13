@@ -360,6 +360,22 @@
         let alertIdCounter = 0;
         let selectedDirection = 'above'; // 'above' | 'below'
 
+        // ─── localStorage kalıcılık ───
+        function saveAlerts() {
+            try {
+                localStorage.setItem('gateio_alerts', JSON.stringify({ alerts, alertIdCounter }));
+            } catch(e) { console.warn('Alarmlar kaydedilemedi:', e); }
+        }
+        function loadAlerts() {
+            try {
+                const raw = localStorage.getItem('gateio_alerts');
+                if (!raw) return;
+                const parsed = JSON.parse(raw);
+                alerts         = parsed.alerts        || [];
+                alertIdCounter = parsed.alertIdCounter || 0;
+            } catch(e) { console.warn('Alarmlar yüklenemedi:', e); }
+        }
+
         // Ses — HTML ile aynı dizindeki alert.mp3 dosyasını kullan
         const alertSound = new Audio('alert.mp3');
         alertSound.preload = 'auto';
@@ -491,12 +507,14 @@
             updateCurrentPriceHint();
             renderAlarmList();
             updateAlarmBadge();
+            saveAlerts();
         }
 
         function removeAlarm(id) {
             alerts = alerts.filter(a => a.id !== id);
             renderAlarmList();
             updateAlarmBadge();
+            saveAlerts();
         }
 
         function clearAllAlarms() {
@@ -505,6 +523,7 @@
             alerts = [];
             renderAlarmList();
             updateAlarmBadge();
+            saveAlerts();
         }
 
         function showFormError(msg) {
@@ -545,6 +564,7 @@
             if (anyFired) {
                 renderAlarmList();
                 updateAlarmBadge();
+                saveAlerts();
             }
         }
 
@@ -970,6 +990,9 @@
         }
 
         // Başlat
+        loadAlerts();
+        renderAlarmList();
+        updateAlarmBadge();
         initApp();
     </script>
 </body>
